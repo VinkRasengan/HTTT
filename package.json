@@ -1,0 +1,52 @@
+{
+  "name": "messenger-simulator",
+  "version": "1.0.0",
+  "description": "Ứng dụng mô phỏng nhắn tin và gọi điện với cấu hình IP",
+  "main": "index.js",
+  "scripts": {
+    "install:all": "node scripts/install-all.js",
+    "start": "echo Starting Messenger Simulator... && concurrently --kill-others-on-fail --prefix-colors \"bgBlue.bold,bgGreen.bold,bgMagenta.bold\" --names \"SERVER,CLIENT,ELECTRON\" \"npm run start:server\" \"npm run start:client\" \"npm run start:electron\"",
+    "stop": "node scripts/stop-processes.js",
+    "start:server": "cd server && npm start",
+    "start:client": "cd client && npm start",
+    "start:electron": "node scripts/start-electron.js",
+    "dev": "echo Starting development mode (web only)... && concurrently --kill-others --prefix-colors \"bgBlue.bold,bgGreen.bold\" --prefix \"[SERVER]\" --prefix \"[CLIENT]\" \"npm run start:server\" \"npm run start:client\"",
+    "build": "echo Building client... && cd client && npm run build",
+    "build:electron": "echo Building electron app... && cd electron && npm run build",
+    "clean": "echo Cleaning node_modules... && rmdir /s /q node_modules 2>nul & rmdir /s /q server\\node_modules 2>nul & rmdir /s /q client\\node_modules 2>nul & rmdir /s /q electron\\node_modules 2>nul & echo Clean completed.",
+    "reset": "npm run clean && npm run install:all",
+    "health": "echo Checking application health... && node -e \"console.log('Node.js version:', process.version)\" && npm --version && echo Health check completed.",
+    "logs": "echo Opening logs... && start cmd /k \"cd server && npm run dev\"",
+    "test": "echo Running tests... && cd server && npm test && cd ../client && npm test",
+    "test:scripts": "node scripts/test-scripts.js"
+  },
+  "keywords": [
+    "messenger",
+    "simulator",
+    "networking",
+    "ip-configuration",
+    "packet-tracer"
+  ],
+  "author": "HTTT Project",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^9.2.0",
+    "cross-env": "^7.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/httt-project/messenger-simulator"
+  },
+  "bugs": {
+    "url": "https://github.com/httt-project/messenger-simulator/issues"
+  },
+  "homepage": "https://github.com/httt-project/messenger-simulator#readme",
+  "dependencies": {
+    "react-dnd": "^16.0.1",
+    "react-dnd-html5-backend": "^16.0.1"
+  }
+}
