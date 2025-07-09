@@ -16,24 +16,30 @@ const NetworkCanvas = ({
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionStart, setConnectionStart] = useState(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [draggedDevice, setDraggedDevice] = useState(null);
+  const [draggedDeviceId, setDraggedDeviceId] = useState(null); // id of device being dragged
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 }); // offset from mouse to device top-left
   const [isDragging, setIsDragging] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
-  const [dragPreview, setDragPreview] = useState(null);
-  const [freeMovement, setFreeMovement] = useState(false);
+  // Set freeMovement default to true
+  const [freeMovement, setFreeMovement] = useState(true);
   const [isDraggingConnection, setIsDraggingConnection] = useState(false);
   const [connectionDragStart, setConnectionDragStart] = useState(null);
-  const [hasDragged, setHasDragged] = useState(false);
-
   // Multi-select & selection box state
   const [selectedDevices, setSelectedDevices] = useState([]); // array of device ids
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectionBox, setSelectionBox] = useState(null); // {x1, y1, x2, y2}
+  // Add state to store initial positions of selected devices at drag start
+  const [multiSelectDragStart, setMultiSelectDragStart] = useState(null);
+  // State lưu vị trí tạm thời khi kéo
+  const [dragPositions, setDragPositions] = useState({});
+  // Thêm ref để lưu animation frame id
+  const dragFrame = useRef(null);
 
   // Grid size for snap-to-grid
   const GRID_SIZE = 20;
 
   // Snap to grid function
+  // In snapToGrid, only snap if freeMovement is false
   const snapToGrid = useCallback((x, y) => {
     if (freeMovement) {
       return { x, y }; // Free movement - no snapping
@@ -54,13 +60,26 @@ const NetworkCanvas = ({
           if (stage) {
             const stagePos = stage.getPointerPosition();
             if (stagePos && stagePos.x !== null && stagePos.y !== null) {
-              const snappedPos = snapToGrid(stagePos.x - 60, stagePos.y - 40);
+              // Center the device at mouse position
+              const deviceWidth = 120;
+              const deviceHeight = 80;
+              const centerX = stagePos.x - deviceWidth / 2;
+              const centerY = stagePos.y - deviceHeight / 2;
+              const snappedPos = snapToGrid(centerX, centerY);
               onDropDevice(item.emulator, snappedPos);
             } else {
-              // Fallback: use offset if stage position is not available
-              const offset = monitor.getClientOffset();
-              if (offset) {
-                const snappedPos = snapToGrid(offset.x - 60, offset.y - 40);
+              // Fallback: use client offset and convert to stage coordinates
+              const clientOffset = monitor.getClientOffset();
+              if (clientOffset) {
+                const canvasElement = stage.container();
+                const canvasRect = canvasElement.getBoundingClientRect();
+                const stageX = clientOffset.x - canvasRect.left;
+                const stageY = clientOffset.y - canvasRect.top;
+                const deviceWidth = 120;
+                const deviceHeight = 80;
+                const centerX = stageX - deviceWidth / 2;
+                const centerY = stageY - deviceHeight / 2;
+                const snappedPos = snapToGrid(centerX, centerY);
                 onDropDevice(item.emulator, snappedPos);
               }
             }
@@ -117,95 +136,8 @@ const NetworkCanvas = ({
   }, [showGrid]);
 
   // Device component with improved drag handling
-  const DeviceShape = ({ device, isSelected }) => {
+  const DeviceShapeComponent = ({ device, isSelected }) => {
     const deviceRef = useRef();
-
-    const handleDragStart = (e) => {
-      try {
-        setIsDragging(true);
-        setHasDragged(false);
-        setDraggedDevice(device);
-        setDragPreview({
-          x: device.x,
-          y: device.y,
-          width: 120,
-          height: 80
-        });
-        
-        if (e.target && e.target.setAttrs) {
-          e.target.setAttrs({
-            shadowBlur: 10,
-            shadowOpacity: 0.3,
-            shadowOffset: { x: 0, y: 4 },
-            scaleX: 1.05,
-            scaleY: 1.05
-          });
-        }
-      } catch (error) {
-        console.error('Error in handleDragStart:', error);
-      }
-    };
-
-    const handleDragMove = (e) => {
-      try {
-        setHasDragged(true);
-        const pos = e.target.position();
-        const snappedPos = snapToGrid(pos.x, pos.y);
-        setDragPreview({
-          x: snappedPos.x,
-          y: snappedPos.y,
-          width: 120,
-          height: 80
-        });
-        // Show grid lines while dragging
-        if (stageRef.current) {
-          stageRef.current.draw();
-        }
-      } catch (error) {
-        console.error('Error in handleDragMove:', error);
-      }
-    };
-
-    const handleDragEnd = (e) => {
-      try {
-        setIsDragging(false);
-        setDraggedDevice(null);
-        setDragPreview(null);
-        
-        const pos = e.target.position();
-        const snappedPos = snapToGrid(pos.x, pos.y);
-        
-        // Update device position immediately without animation
-        onDeviceMove(device.id, snappedPos.x, snappedPos.y);
-        
-        // Reset shadow effects safely
-        if (e.target && e.target.setAttrs) {
-          e.target.setAttrs({
-            shadowBlur: 4,
-            shadowOpacity: 0.1,
-            shadowOffset: { x: 0, y: 2 },
-            scaleX: 1,
-            scaleY: 1
-          });
-        }
-      } catch (error) {
-        console.error('Error in handleDragEnd:', error);
-        // Fallback: just update the position without any effects
-        const pos = e.target.position();
-        const snappedPos = snapToGrid(pos.x, pos.y);
-        onDeviceMove(device.id, snappedPos.x, snappedPos.y);
-      }
-    };
-
-    const handleClick = (e) => {
-      // Only handle click if not dragging, not in connection mode, and hasn't been dragged
-      if (!isDragging && !isConnecting && !isDraggingConnection && !hasDragged) {
-        e.cancelBubble = true;
-        onDeviceClick(device);
-      }
-      // Reset hasDragged after click
-      setHasDragged(false);
-    };
 
     const handleMouseDown = (e) => {
       if (isConnecting) {
@@ -214,6 +146,70 @@ const NetworkCanvas = ({
         setConnectionDragStart(device);
         setConnectionStart(device);
         document.body.style.cursor = 'crosshair';
+        return;
+      }
+
+      // Start custom drag
+      e.cancelBubble = true;
+      setIsDragging(true);
+      setDraggedDeviceId(device.id);
+      
+      // Calculate offset from mouse to device top-left
+      const pointer = stageRef.current.getPointerPosition();
+      setDragOffset({
+        x: pointer.x - device.x,
+        y: pointer.y - device.y
+      });
+      
+      if (selectedDevices.length > 1 && selectedDevices.includes(device.id)) {
+        // Store initial positions for all selected devices
+        setMultiSelectDragStart(selectedDevices.map(id => {
+          const d = devices.find(dev => dev.id === id);
+          return d ? { id, x: d.x, y: d.y } : null;
+        }).filter(Boolean));
+        // Lưu vị trí ban đầu của tất cả thiết bị được chọn
+        setDragPositions(selectedDevices.reduce((acc, id) => {
+          const d = devices.find(dev => dev.id === id);
+          if (d) acc[id] = { x: d.x, y: d.y };
+          return acc;
+        }, {}));
+      } else {
+        setMultiSelectDragStart(null);
+        setDragPositions({ [device.id]: { x: device.x, y: device.y } });
+      }
+      
+      // Add visual feedback
+      if (deviceRef.current) {
+        deviceRef.current.getChildren()[0].setAttrs({
+          shadowBlur: 10,
+          shadowOpacity: 0.3,
+          shadowOffset: { x: 0, y: 4 },
+          scaleX: 1.05,
+          scaleY: 1.05
+        });
+      }
+    };
+
+    const handleDragStart = (e) => {
+      // Konva drag start - we'll handle this with mousedown instead
+      e.cancelBubble = true;
+    };
+
+    const handleDragMove = (e) => {
+      // Konva drag move - we'll handle this with stage mouse move instead
+      e.cancelBubble = true;
+    };
+
+    const handleDragEnd = (e) => {
+      // Konva drag end - we'll handle this with mouse up instead
+      e.cancelBubble = true;
+    };
+
+    const handleClick = (e) => {
+      // Only handle click if not dragging, not in connection mode
+      if (!isDragging && !isConnecting && !isDraggingConnection) {
+        e.cancelBubble = true;
+        onDeviceClick(device);
       }
     };
 
@@ -252,7 +248,7 @@ const NetworkCanvas = ({
         ref={deviceRef}
         x={device.x}
         y={device.y}
-        draggable
+        draggable={false}
         onDragStart={handleDragStart}
         onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
@@ -352,7 +348,7 @@ const NetworkCanvas = ({
   };
 
   // Connection line component with improved rendering
-  const ConnectionLine = ({ connection, devices }) => {
+  const ConnectionLineComponent = ({ connection, devices }) => {
     const sourceDevice = devices.find(d => d.id === connection.sourceId);
     const targetDevice = devices.find(d => d.id === connection.targetId);
     
@@ -459,15 +455,21 @@ const NetworkCanvas = ({
 
   // Drag preview component
   const DragPreview = () => {
-    if (!dragPreview || !isDragging) return null;
+    if (!draggedDeviceId || !isDragging) return null;
+
+    const draggedDevice = devices.find(d => d.id === draggedDeviceId);
+    if (!draggedDevice) return null;
+
+    const previewX = draggedDevice.x + dragOffset.x;
+    const previewY = draggedDevice.y + dragOffset.y;
 
     return (
       <Group>
         <Rect
-          x={dragPreview.x}
-          y={dragPreview.y}
-          width={dragPreview.width}
-          height={dragPreview.height}
+          x={previewX}
+          y={previewY}
+          width={120}
+          height={80}
           cornerRadius={8}
           fill="#3b82f6"
           opacity={0.3}
@@ -476,8 +478,8 @@ const NetworkCanvas = ({
           dash={[5, 5]}
         />
         <Text
-          x={dragPreview.x + 10}
-          y={dragPreview.y + 35}
+          x={previewX + 10}
+          y={previewY + 35}
           text="Drop here"
           fontSize={12}
           fontFamily="Inter"
@@ -521,24 +523,95 @@ const NetworkCanvas = ({
     }
   }, []);
 
-  // Handle stage mouse move for selection box
+  // Handle stage mouse move for selection box and custom drag
   const handleStageMouseMove = useCallback((e) => {
+    // Handle custom drag
+    if (isDragging && draggedDeviceId) {
+      const pointer = stageRef.current.getPointerPosition();
+      if (!pointer) return;
+      
+      if (dragFrame.current) {
+        cancelAnimationFrame(dragFrame.current);
+      }
+      
+      dragFrame.current = requestAnimationFrame(() => {
+        if (multiSelectDragStart && selectedDevices.length > 1 && selectedDevices.includes(draggedDeviceId)) {
+          const deltaX = pointer.x - dragOffset.x - devices.find(d => d.id === draggedDeviceId)?.x || 0;
+          const deltaY = pointer.y - dragOffset.y - devices.find(d => d.id === draggedDeviceId)?.y || 0;
+          const newPositions = {};
+          multiSelectDragStart.forEach(dragged => {
+            newPositions[dragged.id] = {
+              x: dragged.x + deltaX,
+              y: dragged.y + deltaY
+            };
+          });
+          setDragPositions(newPositions);
+        } else {
+          setDragPositions({
+            [draggedDeviceId]: {
+              x: pointer.x - dragOffset.x,
+              y: pointer.y - dragOffset.y
+            }
+          });
+        }
+        if (stageRef.current) {
+          stageRef.current.draw();
+        }
+      });
+      return;
+    }
+    
+    // Handle selection box
     if (isSelecting && selectionBox) {
       const pos = stageRef.current.getPointerPosition();
       setSelectionBox(box => box ? { ...box, x2: pos.x, y2: pos.y } : null);
     }
-  }, [isSelecting, selectionBox]);
+    
+    // Handle temporary connection
+    const pos = e.target.getStage().getPointerPosition();
+    setMousePos(pos);
+  }, [isDragging, draggedDeviceId, dragOffset, multiSelectDragStart, selectedDevices, devices, isSelecting, selectionBox]);
 
-  // Handle stage mouse up to finish selection box
+  // Handle stage mouse up to finish selection box and custom drag
   const handleStageMouseUp = useCallback((e) => {
+    // Handle custom drag end
+    if (isDragging && draggedDeviceId) {
+      setIsDragging(false);
+      setDraggedDeviceId(null);
+      setMultiSelectDragStart(null);
+      
+      // Update final positions
+      Object.entries(dragPositions).forEach(([id, pos]) => {
+        onDeviceMove(id, pos.x, pos.y);
+      });
+      setDragPositions({});
+      
+      // Reset visual feedback
+      devices.forEach(device => {
+        if (selectedDevices.includes(device.id) || device.id === draggedDeviceId) {
+          // Find device element and reset shadow
+          const deviceElements = stageRef.current?.find(`.device-${device.id}`);
+          if (deviceElements && deviceElements[0]) {
+            deviceElements[0].setAttrs({
+              shadowBlur: 4,
+              shadowOpacity: 0.1,
+              shadowOffset: { x: 0, y: 2 },
+              scaleX: 1,
+              scaleY: 1
+            });
+          }
+        }
+      });
+      return;
+    }
+    
+    // Handle selection box
     if (isSelecting && selectionBox) {
-      // Calculate selection rectangle
       const { x1, y1, x2, y2 } = selectionBox;
       const minX = Math.min(x1, x2);
       const maxX = Math.max(x1, x2);
       const minY = Math.min(y1, y2);
       const maxY = Math.max(y1, y2);
-      // Find devices in box
       const selected = devices.filter(d => {
         const dx = d.x;
         const dy = d.y;
@@ -548,7 +621,42 @@ const NetworkCanvas = ({
       setIsSelecting(false);
       setSelectionBox(null);
     }
-  }, [isSelecting, selectionBox, devices]);
+  }, [isDragging, draggedDeviceId, dragPositions, onDeviceMove, selectedDevices, devices, isSelecting, selectionBox]);
+
+  const DeviceShape = React.memo(DeviceShapeComponent, (prevProps, nextProps) => {
+    // Only re-render if device position, id, or selection state changes
+    return (
+      prevProps.device.x === nextProps.device.x &&
+      prevProps.device.y === nextProps.device.y &&
+      prevProps.device.id === nextProps.device.id &&
+      prevProps.isSelected === nextProps.isSelected
+    );
+  });
+
+  const ConnectionLine = React.memo(ConnectionLineComponent, (prevProps, nextProps) => {
+    // Only re-render if connection or device positions change
+    if (prevProps.connection !== nextProps.connection) return false;
+    const getDevice = (id, devices) => devices.find(d => d.id === id);
+    const prevSource = getDevice(prevProps.connection.sourceId, prevProps.devices);
+    const prevTarget = getDevice(prevProps.connection.targetId, prevProps.devices);
+    const nextSource = getDevice(nextProps.connection.sourceId, nextProps.devices);
+    const nextTarget = getDevice(nextProps.connection.targetId, nextProps.devices);
+    return (
+      prevSource?.x === nextSource?.x &&
+      prevSource?.y === nextSource?.y &&
+      prevTarget?.x === nextTarget?.x &&
+      prevTarget?.y === nextTarget?.y
+    );
+  });
+
+  // Clear animation frame khi drag end hoặc unmount
+  React.useEffect(() => {
+    return () => {
+      if (dragFrame.current) {
+        cancelAnimationFrame(dragFrame.current);
+      }
+    };
+  }, []);
 
   return (
     <div className="relative">
@@ -577,12 +685,12 @@ const NetworkCanvas = ({
         <button
           onClick={() => setFreeMovement(!freeMovement)}
           className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-            freeMovement 
+            !freeMovement 
               ? 'bg-purple-500 text-white hover:bg-purple-600' 
               : 'bg-orange-500 text-white hover:bg-orange-600'
           }`}
         >
-          {freeMovement ? 'Bật Grid' : 'Tự do'}
+          {!freeMovement ? 'Bật tự do' : 'Snap to grid'}
         </button>
         {isConnecting && (
           <div className="px-3 py-2 bg-blue-100 text-blue-800 rounded-lg text-sm">
@@ -631,10 +739,24 @@ const NetworkCanvas = ({
             {devices.map(device => (
               <DeviceShape
                 key={device.id}
-                device={device}
-                isSelected={false}
+                device={{ ...device, ...(dragPositions[device.id] || {}) }}
+                isSelected={selectedDevices.includes(device.id)}
               />
             ))}
+
+            {/* Selection box */}
+            {isSelecting && selectionBox && (
+              <Rect
+                x={Math.min(selectionBox.x1, selectionBox.x2)}
+                y={Math.min(selectionBox.y1, selectionBox.y2)}
+                width={Math.abs(selectionBox.x2 - selectionBox.x1)}
+                height={Math.abs(selectionBox.y2 - selectionBox.y1)}
+                fill="rgba(59, 130, 246, 0.1)"
+                stroke="#3b82f6"
+                strokeWidth={1}
+                dash={[5, 5]}
+              />
+            )}
           </Layer>
         </Stage>
       </div>
@@ -648,16 +770,10 @@ const NetworkCanvas = ({
 
       {/* Instructions */}
       <div className="mt-4 text-sm text-gray-600">
-        <p>• Kéo thả thiết bị từ danh sách xuống canvas</p>
-        <p>• <strong>Click vào thiết bị</strong> để cấu hình IP và các setting</p>
-        <p>• <strong>Kéo thiết bị</strong> để di chuyển vị trí (tự động snap to grid)</p>
-        <p>• Sử dụng nút "Tự do" để di chuyển thiết bị tự do không bị giới hạn grid</p>
-        <p>• Click "Kéo kết nối" rồi kéo từ thiết bị này sang thiết bị khác để tạo kết nối</p>
-        <p>• Dây xanh = kết nối thành công, dây đỏ = lỗi kết nối</p>
-        <p>• Sử dụng nút "Hiện/Ẩn lưới" để bật/tắt grid</p>
+        <p>Kéo thiết bị từ danh sách vào canvas. Click thiết bị để cấu hình. Giữ Shift và kéo để chọn nhiều thiết bị.</p>
       </div>
     </div>
   );
 };
 
-export default NetworkCanvas; 
+export default NetworkCanvas;
