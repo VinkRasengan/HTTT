@@ -218,9 +218,11 @@ const NetworkCanvas = ({
         e.cancelBubble = true;
         // Create connection
         onAddConnection(connectionDragStart.id, device.id);
+        // Reset all connection states
         setIsDraggingConnection(false);
         setConnectionDragStart(null);
         setConnectionStart(null);
+        setIsConnecting(false); // Also reset isConnecting to hide temporary line
         document.body.style.cursor = 'default';
       }
     };
